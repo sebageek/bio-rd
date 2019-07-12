@@ -5,48 +5,92 @@ import (
 	"sync"
 )
 
-var globalRegistry *vrfRegistry
+var globalRegistry *VRFRegistry
 
 func init() {
-	globalRegistry = &vrfRegistry{
-		vrfsName: make(map[string]*VRF),
-		vrfsID:   make(map[uint32]*VRF),
+	globalRegistry = NewVRFRegistry()
+}
+
+// VRFRegistry holds a reference to all active VRFs. Every VRF have to have a different name.
+type VRFRegistry struct {
+	vrfs map[uint64]*VRF
+	mu   sync.Mutex
+}
+
+func NewVRFRegistry() *VRFRegistry {
+	return &VRFRegistry{
+		vrfs: make(map[uint64]*VRF),
 	}
 }
 
-// vrfRegistry holds a reference to all active VRFs. Every VRF have to have a different name.
-type vrfRegistry struct {
-	vrfsName map[string]*VRF
-	mu       sync.Mutex
-	vrfsID   map[uint32]*VRF
-}
-
-// registerVRF adds the given VRF from the global registry.
-// An error is returned if there is already a VRF registered with the same name.
-func (r *vrfRegistry) registerVRF(v *VRF) error {
+func (r *VRFRegistry) CreateVRFIfNotExists(name string, rd uint64) *VRF {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	_, found := r.vrfsName[v.name]
-	if found {
-		return fmt.Errorf("a VRF with the name '%s' already exists", v.name)
+	if _, ok := r.vrfs[rd]; ok {
+		return r.vrfs[rd]
 	}
 
-	_, found = r.vrfsID[v.id]
-	if found {
-		return fmt.Errorf("a VRF with the id '%d' already exists", v.id)
+	r.vrfs[rd] = newUntrackedVRF(name, rd)
+	r.vrfs[rd].CreateIPv4UnicastLocRIB("inet.0")
+	r.vrfs[rd].CreateIPv6UnicastLocRIB("inet6.0")
+	return r.vrfs[rd]
+}
+
+// registerVRF adds the given VRF from the global registry.
+// An error is returned if there is already a VRF registered with the same route distinguisher.
+func (r *VRFRegistry) registerVRF(v *VRF) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.vrfs[v.routeDistinguisher]; ok {
+		return fmt.Errorf("a VRF with the rd '%d' already exists", v.routeDistinguisher)
 	}
 
-	r.vrfsName[v.name] = v
-	r.vrfsID[v.id] = v
+	r.vrfs[v.routeDistinguisher] = v
 	return nil
 }
 
 // unregisterVRF removes the given VRF from the global registry.
-func (r *vrfRegistry) unregisterVRF(v *VRF) {
+func (r *VRFRegistry) unregisterVRF(v *VRF) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	delete(r.vrfsName, v.name)
-	delete(r.vrfsID, v.id)
+	delete(r.vrfs, v.routeDistinguisher)
+}
+
+func (r *VRFRegistry) List() []*VRF {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	l := make([]*VRF, len(r.vrfs))
+	i := 0
+	for _, v := range r.vrfs {
+		l[i] = v
+		i++
+	}
+
+	return l
+}
+
+// GetVRFByRD gets a VRF by it's Route Distinguisher
+func GetVRFByRD(rd uint64) *VRF {
+	return globalRegistry.GetVRFByRD(rd)
+}
+
+// GetGlobalRegistry gets the global registry
+func GetGlobalRegistry() *VRFRegistry {
+	return globalRegistry
+}
+
+// GetVRFByRD gets a VRF by route distinguisher
+func (r *VRFRegistry) GetVRFByRD(rd uint64) *VRF {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.vrfs[rd]; ok {
+		return r.vrfs[rd]
+	}
+
+	return nil
 }
