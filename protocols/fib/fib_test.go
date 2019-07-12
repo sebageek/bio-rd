@@ -17,7 +17,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestComparePfxPath(t *testing.T) {
-	v, _ := vrf.NewDefaultVRF()
+	v, _ := vrf.New("inet.0", 0)
 	f, _ := New(v)
 
 	tests := []struct {

@@ -15,6 +15,10 @@ type osFibAdapterDarwin struct {
 	fib *FIB
 }
 
+func (fib *osFibAdapterLinux) getFibName() string {
+	return "darwin"
+}
+
 func newOSFIBDarwin(f *FIB) (*osFibAdapterDarwin, error) {
 	fib := &osFibAdapterDarwin{
 		fib: f,
@@ -28,5 +32,13 @@ func (fib *osFibAdapterDarwin) addPath(pfx bnet.Prefix, paths []*route.FIBPath) 
 }
 
 func (fib *osFibAdapterDarwin) removePath(pfx bnet.Prefix, path *route.FIBPath) error {
+	return fmt.Errorf("Not implemented")
+}
+
+func (fib *osFibAdapterDarwin) needsVrfID() bool {
+	return false
+}
+
+func (fib *osFibAdapterDarwin) setVrfID(vrdID string) error {
 	return fmt.Errorf("Not implemented")
 }

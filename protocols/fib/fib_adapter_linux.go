@@ -15,7 +15,24 @@ func (f *FIB) loadOSAdapter() {
 }
 
 type osFibAdapterLinux struct {
-	fib *FIB
+	fib   *FIB
+	vrfID uint64
+}
+
+func (fib *osFibAdapterLinux) getFibName() string {
+	return "rt_netlink"
+}
+
+func (fib *osFibAdapterLinux) needsVrfID() bool {
+	return true
+}
+
+func (fib *osFibAdapterLinux) setVrfID(vrdID string) error {
+	// TODO: cast string to int
+	//fib.vrfID = (uint64)vrdID
+	// TODO: this is just a hack:
+	fib.vrfID = uint64(254)
+	return nil
 }
 
 func newOSFIBLinux(f *FIB) *osFibAdapterLinux {
@@ -26,8 +43,8 @@ func newOSFIBLinux(f *FIB) *osFibAdapterLinux {
 	return linuxAdapter
 }
 
-func (f *osFibAdapterLinux) addPath(pfx bnet.Prefix, paths []*route.FIBPath) error {
-	route, err := f.createRoute(pfx, paths)
+func (fib *osFibAdapterLinux) addPath(pfx bnet.Prefix, paths []*route.FIBPath) error {
+	route, err := fib.createRoute(pfx, paths)
 	if err != nil {
 		return errors.Wrap(err, "Could not create route from prefix and path: %v")
 	}
@@ -45,8 +62,8 @@ func (f *osFibAdapterLinux) addPath(pfx bnet.Prefix, paths []*route.FIBPath) err
 	return nil
 }
 
-func (f *osFibAdapterLinux) removePath(pfx bnet.Prefix, path *route.FIBPath) error {
-	nlRoute, err := f.createRoute(pfx, []*route.FIBPath{path})
+func (fib *osFibAdapterLinux) removePath(pfx bnet.Prefix, path *route.FIBPath) error {
+	nlRoute, err := fib.createRoute(pfx, []*route.FIBPath{path})
 	if err != nil {
 		return errors.Wrap(err, "Could not create route from prefix and path: %v")
 	}
@@ -64,10 +81,14 @@ func (f *osFibAdapterLinux) removePath(pfx bnet.Prefix, path *route.FIBPath) err
 }
 
 // create a route from a prefix and a path
-func (f *osFibAdapterLinux) createRoute(pfx bnet.Prefix, paths []*route.FIBPath) (*netlink.Route, error) {
+func (fib *osFibAdapterLinux) createRoute(pfx bnet.Prefix, paths []*route.FIBPath) (*netlink.Route, error) {
+	if fib.vrfID == 0 {
+		return nil, fmt.Errorf("VRF-ID is not set")
+	}
+
 	route := &netlink.Route{
 		Dst:      pfx.GetIPNet(),
-		Table:    int(f.fib.vrf.ID()),
+		Table:    int(fib.vrfID),
 		Protocol: route.ProtoBio,
 	}
 

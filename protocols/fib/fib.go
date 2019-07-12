@@ -15,6 +15,9 @@ import (
 type fibOsAdapter interface {
 	addPath(pfx bnet.Prefix, paths []*route.FIBPath) error
 	removePath(pfx bnet.Prefix, path *route.FIBPath) error
+	getFibName() string
+	needsVrfID() bool
+	setVrfID(vrdID string) error
 }
 
 // FIB is forwarding information base
@@ -43,6 +46,22 @@ func New(v *vrf.VRF) (*FIB, error) {
 	return n, nil
 }
 
+// SetVrfID specifies the vrf id for the fib implementation.
+// Some fib implementations don't need a VRF-ID.
+// This method will return an error, in case the hardware specific fib implementation
+// doesn't support or need a vrfId
+func (f *FIB) SetVrfID(vrfID string) error {
+	if f.osAdapter != nil {
+		return fmt.Errorf("osAdapter is nil")
+	}
+
+	if !f.osAdapter.needsVrfID() {
+		return fmt.Errorf("The fib implementation for %s doesn't need a routing table identifier", f.osAdapter.getFibName())
+	}
+
+	return f.osAdapter.setVrfID(vrfID)
+}
+
 // Start the Netlink module
 func (f *FIB) Start() error {
 	if f.osAdapter == nil {
@@ -57,15 +76,16 @@ func (f *FIB) Start() error {
 	}
 
 	// register to all ribs in VRF
-	vrfRIBs := f.vrf.GetRIBNames()
-	for _, ribName := range vrfRIBs {
-		rib, found := f.vrf.RIBByName(ribName)
-		if !found {
-			continue
-		}
-
+	rib4, found := f.vrf.RIBByName("inet.0")
+	if found {
 		// from locRib to FIB
-		rib.RegisterWithOptions(f, options)
+		rib4.RegisterWithOptions(f, options)
+	}
+
+	rib6, found := f.vrf.RIBByName("inet6.0")
+	if found {
+		// from locRib to FIB
+		rib6.RegisterWithOptions(f, options)
 	}
 
 	return nil
