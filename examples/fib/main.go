@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/bio-routing/bio-rd/route"
 	"time"
+
+	"github.com/bio-routing/bio-rd/route"
 
 	bnet "github.com/bio-routing/bio-rd/net"
 	"github.com/bio-routing/bio-rd/protocols/fib"
@@ -31,7 +32,7 @@ func addPath(v *vrf.VRF) {
 }
 
 func main() {
-	v, err := vrf.NewDefaultVRF()
+	v, err := vrf.New("inet.254", 0)
 	if err != nil {
 		logrus.Fatal(err)
 	}
