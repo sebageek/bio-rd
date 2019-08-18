@@ -23,6 +23,12 @@ func IPFromProtoIP(addr api.IP) IP {
 	}
 }
 
+// IPFromNetIP converts a net.IP into a bio IP
+func IPFromNetIP(addr net.IP) IP {
+	a, _ := IPFromBytes([]byte(addr))
+	return a
+}
+
 // ToProto converts an IP to a proto IP
 func (ip IP) ToProto() *api.IP {
 	ver := api.IP_IPv6
