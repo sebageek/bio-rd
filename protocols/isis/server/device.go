@@ -114,10 +114,6 @@ func (d *dev) disable() error {
 	return nil
 }
 
-func (d *dev) receiverRoutine() {
-	// To be implemented
-}
-
 func (d *dev) helloRoutine() {
 	// To be implemented
 }
