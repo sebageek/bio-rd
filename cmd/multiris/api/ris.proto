@@ -4,7 +4,8 @@ package bio.ris;
 
 import "github.com/bio-routing/bio-rd/net/api/net.proto";
 import "github.com/bio-routing/bio-rd/route/api/route.proto";
-option go_package = "github.com/bio-routing/bio-rd/cmd/ris/api";
+import "github.com/bio-routing/bio-rd/protocols/bgp/api/session.proto";
+option go_package = "github.com/bio-routing/bio-rd/cmd/multiris/api";
 
 service RoutingInformationService {
     rpc LPM(LPMRequest) returns (LPMResponse) {};
@@ -13,6 +14,7 @@ service RoutingInformationService {
     rpc GetLonger(GetLongerRequest) returns (GetLongerResponse) {};
     rpc ObserveRIB(ObserveRIBRequest) returns (stream RIBUpdate);
     rpc DumpRIB(DumpRIBRequest) returns (stream DumpRIBReply);
+    rpc GetNeighbors(GetNeighborsRequest) returns (GetNeighborsResponse) {};
 }
 
 message LPMRequest {
@@ -89,3 +91,11 @@ message GetRoutersResponse {
     repeated Router routers = 1;
 }
 
+message GetNeighborsRequest {
+    string router = 1;
+    uint64 vrf_id = 2;
+}
+
+message GetNeighborsResponse {
+    repeated bio.bgp.Session neighbors = 1;
+}

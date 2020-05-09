@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/bio-routing/bio-rd/net"
+	"github.com/bio-routing/bio-rd/protocols/bgp/packet"
 	"github.com/bio-routing/bio-rd/protocols/bgp/server"
 	"github.com/bio-routing/bio-rd/route"
 	"github.com/bio-routing/bio-rd/routingtable"
@@ -17,11 +18,23 @@ import (
 	bnet "github.com/bio-routing/bio-rd/net"
 	netapi "github.com/bio-routing/bio-rd/net/api"
 	routeapi "github.com/bio-routing/bio-rd/route/api"
+	// bgpapi "github.com/bio-routing/bio-rd/protocols/bgp/api"
 )
 
 var (
 	risObserveFIBClients *prometheus.GaugeVec
 )
+
+// RISRIB is the interface used to access a RIB by the RIS
+type RISRIB interface {
+	RegisterWithOptions(routingtable.RouteTableClient, routingtable.ClientOptions)
+	Unregister(routingtable.RouteTableClient)
+	Dump() []*route.Route
+	LPM(pfx *net.Prefix) (res []*route.Route)
+	Get(pfx *net.Prefix) *route.Route
+	GetLonger(pfx *net.Prefix) (res []*route.Route)
+}
+
 
 func init() {
 	risObserveFIBClients = prometheus.NewGaugeVec(
@@ -40,44 +53,71 @@ func init() {
 	prometheus.MustRegister(risObserveFIBClients)
 }
 
+// RISDataSource is something I don't know yet
+type RISDataSource interface {
+	hasRouter(string) bool
+	getRouter() bool
+}
+
 // Server represents an RoutingInformationService server
 type Server struct {
 	bmp *server.BMPServer
+	bgp server.BGPServer
 }
 
 // NewServer creates a new server
-func NewServer(b *server.BMPServer) *Server {
+func NewServer(bmp *server.BMPServer, bgp server.BGPServer) *Server {
 	return &Server{
-		bmp: b,
+		bmp: bmp,
+		bgp: bgp,
 	}
 }
 
-func (s Server) getRIB(rtr string, vrfID uint64, ipVersion netapi.IP_Version) (*locRIB.LocRIB, error) {
+func (s Server) getRIB(rtr string, vrfID uint64, ipVersion netapi.IP_Version) (RISRIB, error) {
 	r := s.bmp.GetRouter(rtr)
-	if r == nil {
-		return nil, fmt.Errorf("Unable to get router %q", rtr)
+	if r != nil {
+
+		v := r.GetVRF(vrfID)
+		if v == nil {
+			return nil, fmt.Errorf("Unable to get VRF %d", vrfID)
+		}
+
+		var rib *locRIB.LocRIB
+		switch ipVersion {
+		case netapi.IP_IPv4:
+			rib = v.IPv4UnicastRIB()
+		case netapi.IP_IPv6:
+			rib = v.IPv6UnicastRIB()
+		default:
+			return nil, fmt.Errorf("Unknown afi")
+		}
+
+		if rib == nil {
+			return nil, fmt.Errorf("Unable to get RIB")
+		}
+
+		return rib, nil
 	}
 
-	v := r.GetVRF(vrfID)
-	if v == nil {
-		return nil, fmt.Errorf("Unable to get VRF %d", vrfID)
+	rtraddr, err := bnet.IPFromString(rtr)
+	if err == nil {
+		peer := s.bgp.GetPeerConfig(&rtraddr)
+		if peer != nil && peer.VRF.RD() == vrfID {
+			var afi uint16
+			switch ipVersion {
+			case netapi.IP_IPv4:
+				afi = packet.IPv4AFI
+			case netapi.IP_IPv6:
+				afi = packet.IPv6AFI
+			default:
+				return nil, fmt.Errorf("Unknown afi")
+			}
+			ribin := s.bgp.GetRIBIn(&rtraddr, afi, packet.UnicastSAFI)
+			return ribin, nil
+		}
 	}
 
-	var rib *locRIB.LocRIB
-	switch ipVersion {
-	case netapi.IP_IPv4:
-		rib = v.IPv4UnicastRIB()
-	case netapi.IP_IPv6:
-		rib = v.IPv6UnicastRIB()
-	default:
-		return nil, fmt.Errorf("Unknown afi")
-	}
-
-	if rib == nil {
-		return nil, fmt.Errorf("Unable to get RIB")
-	}
-
-	return rib, nil
+	return nil, fmt.Errorf("Unable to get router %q", rtr)
 }
 
 // LPM provides a longest prefix match service
@@ -241,7 +281,31 @@ func (s *Server) GetRouters(c context.Context, request *pb.GetRoutersRequest) (*
 			Address: r.Address().String(),
 		})
 	}
+	if s.bgp != nil {
+		for _, peerIP := range s.bgp.GetPeers() {
+			peerCfg := s.bgp.GetPeerConfig(peerIP)
+			vrfIDs := make([]uint64, 0, 1)
+			vrfIDs = append(vrfIDs, peerCfg.VRF.RD())
+			resp.Routers = append(resp.Routers, &pb.Router{
+				SysName: peerIP.String(),
+				VrfIds:  vrfIDs,
+				Address: peerIP.String(),
+			})
+		}
+	}
 	return resp, nil
+}
+
+// GetNeighbors for a router
+func (s *Server) GetNeighbors(c context.Context, req *pb.GetNeighborsRequest) (*pb.GetNeighborsResponse, error) {
+	r := s.bmp.GetRouter(req.Router)
+	if r != nil {
+		resp := &pb.GetNeighborsResponse{
+			Neighbors: r.GetNeighbors(),
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("Could not find find router")
 }
 
 type update struct {
