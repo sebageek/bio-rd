@@ -49,6 +49,39 @@ func TestAddPath(t *testing.T) {
 			},
 		},
 		{
+			name: "Add same route twice",
+			routes: []*route.Route{
+				route.NewRoute(net.NewPfx(net.IPv4FromOctets(10, 0, 0, 0), 8).Ptr(), &route.Path{
+					Type: route.BGPPathType,
+					BGPPath: &route.BGPPath{
+						BGPPathA: &route.BGPPathA{
+							LocalPref: 100,
+						},
+					},
+				}),
+				route.NewRoute(net.NewPfx(net.IPv4FromOctets(10, 0, 0, 0), 8).Ptr(), &route.Path{
+					Type: route.BGPPathType,
+					BGPPath: &route.BGPPath{
+						BGPPathA: &route.BGPPathA{
+							LocalPref: 100,
+						},
+					},
+				}),
+			},
+			removePfx:  nil,
+			removePath: nil,
+			expected: []*route.Route{
+				route.NewRoute(net.NewPfx(net.IPv4FromOctets(10, 0, 0, 0), 8).Ptr(), &route.Path{
+					Type: route.BGPPathType,
+					BGPPath: &route.BGPPath{
+						BGPPathA: &route.BGPPathA{
+							LocalPref: 100,
+						},
+					},
+				}),
+			},
+		},
+		{
 			name: "Overwrite routes",
 			routes: []*route.Route{
 				route.NewRoute(net.NewPfx(net.IPv4FromOctets(10, 0, 0, 0), 8).Ptr(), &route.Path{
