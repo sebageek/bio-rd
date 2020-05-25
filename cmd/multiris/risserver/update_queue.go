@@ -3,7 +3,7 @@ package risserver
 import (
 	"sync"
 
-	pb "github.com/bio-routing/bio-rd/cmd/ris/api"
+	pb "github.com/bio-routing/bio-rd/cmd/multiris/api"
 )
 
 type updateFIFO struct {

@@ -10,19 +10,23 @@ import (
 	"github.com/bio-routing/bio-rd/route"
 	"github.com/bio-routing/bio-rd/routingtable"
 	"github.com/bio-routing/bio-rd/routingtable/filter"
-	"github.com/bio-routing/bio-rd/routingtable/locRIB"
+	"github.com/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	pb "github.com/bio-routing/bio-rd/cmd/ris/api"
+	pb "github.com/bio-routing/bio-rd/cmd/multiris/api"
 	bnet "github.com/bio-routing/bio-rd/net"
 	netapi "github.com/bio-routing/bio-rd/net/api"
+	bgpapi "github.com/bio-routing/bio-rd/protocols/bgp/api"
 	routeapi "github.com/bio-routing/bio-rd/route/api"
-	// bgpapi "github.com/bio-routing/bio-rd/protocols/bgp/api"
 )
 
 var (
 	risObserveFIBClients *prometheus.GaugeVec
+)
+
+const (
+	localBGP = "local-bgp"
 )
 
 // RISRIB is the interface used to access a RIB by the RIS
@@ -34,7 +38,6 @@ type RISRIB interface {
 	Get(pfx *net.Prefix) *route.Route
 	GetLonger(pfx *net.Prefix) (res []*route.Route)
 }
-
 
 func init() {
 	risObserveFIBClients = prometheus.NewGaugeVec(
@@ -73,8 +76,18 @@ func NewServer(bmp *server.BMPServer, bgp server.BGPServer) *Server {
 	}
 }
 
-func (s Server) getRIB(rtr string, vrfID uint64, ipVersion netapi.IP_Version) (RISRIB, error) {
+func (s Server) getRIB(rtr string, vrfID uint64, ipVersion netapi.IP_Version, neighbor string) (RISRIB, error) {
 	r := s.bmp.GetRouter(rtr)
+
+	var neighborAddr *bnet.IP
+	if neighbor != "" {
+		nAddr, err := bnet.IPFromString(neighbor)
+		if err != nil {
+			return nil, errors.Wrap(err, "Could parse neighbor address")
+		}
+		neighborAddr = &nAddr
+	}
+
 	if r != nil {
 
 		v := r.GetVRF(vrfID)
@@ -82,47 +95,113 @@ func (s Server) getRIB(rtr string, vrfID uint64, ipVersion netapi.IP_Version) (R
 			return nil, fmt.Errorf("Unable to get VRF %d", vrfID)
 		}
 
-		var rib *locRIB.LocRIB
-		switch ipVersion {
-		case netapi.IP_IPv4:
-			rib = v.IPv4UnicastRIB()
-		case netapi.IP_IPv6:
-			rib = v.IPv6UnicastRIB()
-		default:
-			return nil, fmt.Errorf("Unknown afi")
-		}
-
-		if rib == nil {
-			return nil, fmt.Errorf("Unable to get RIB")
-		}
-
-		return rib, nil
-	}
-
-	rtraddr, err := bnet.IPFromString(rtr)
-	if err == nil {
-		peer := s.bgp.GetPeerConfig(&rtraddr)
-		if peer != nil && peer.VRF.RD() == vrfID {
-			var afi uint16
+		var rib RISRIB
+		if neighborAddr == nil {
+			// no neighbor, return rib of router
 			switch ipVersion {
 			case netapi.IP_IPv4:
-				afi = packet.IPv4AFI
+				rib = v.IPv4UnicastRIB()
 			case netapi.IP_IPv6:
-				afi = packet.IPv6AFI
+				rib = v.IPv6UnicastRIB()
 			default:
 				return nil, fmt.Errorf("Unknown afi")
 			}
-			ribin := s.bgp.GetRIBIn(&rtraddr, afi, packet.UnicastSAFI)
-			return ribin, nil
+			if rib == nil {
+				return nil, fmt.Errorf("Unable to get RIB")
+			}
+
+			return rib, nil
 		}
+
+		// got a neighbor
+		var ipBgpVersion uint16
+		switch ipVersion {
+		case netapi.IP_IPv4:
+			ipBgpVersion = packet.IPv4AFI
+		case netapi.IP_IPv6:
+			ipBgpVersion = packet.IPv6AFI
+		default:
+			return nil, fmt.Errorf("Unknown afi")
+		}
+		rib, err := r.GetNeighborRIBIn(neighborAddr, ipBgpVersion, packet.UnicastSAFI)
+		if err != nil {
+			return nil, errors.Wrap(err, "Could not get neighbor RIB")
+		}
+		return rib, nil
 	}
 
-	return nil, fmt.Errorf("Unable to get router %q", rtr)
+	//rtraddr, err := bnet.IPFromString(rtr)
+	//if err == nil {
+	//	peer := s.bgp.GetPeerConfig(&rtraddr)
+	//	if peer != nil && peer.VRF.RD() == vrfID {
+	//		var afi uint16
+	//		switch ipVersion {
+	//		case netapi.IP_IPv4:
+	//			afi = packet.IPv4AFI
+	//		case netapi.IP_IPv6:
+	//			afi = packet.IPv6AFI
+	//		default:
+	//			return nil, fmt.Errorf("Unknown afi")
+	//		}
+	//		ribin := s.bgp.GetRIBIn(&rtraddr, afi, packet.UnicastSAFI)
+	//		return ribin, nil
+	//	}
+	//}
+	if rtr == localBGP {
+		//switch ipVersion {
+		//case netapi.IP_IPv4:
+		//	afi = packet.IPv4AFI
+		//case netapi.IP_IPv6:
+		//	afi = packet.IPv6AFI
+		//default:
+		//	return nil, fmt.Errorf("Unknown afi")
+		//}
+		//rtraddr, err := bnet.IPFromString(rtr)
+		//if err == nil {
+		if neighborAddr == nil {
+			// find VRF and return requested RIB
+			for _, peerAddr := range s.bgp.GetPeers() {
+				peer := s.bgp.GetPeerConfig(peerAddr)
+				if peer != nil && peer.VRF.RD() == vrfID {
+					v := peer.VRF
+					switch ipVersion {
+					case netapi.IP_IPv4:
+						return v.IPv4UnicastRIB(), nil
+					case netapi.IP_IPv6:
+						return v.IPv6UnicastRIB(), nil
+					default:
+						return nil, fmt.Errorf("Unknown afi")
+					}
+				}
+			}
+		} else {
+			peer := s.bgp.GetPeerConfig(neighborAddr)
+			if peer != nil && peer.VRF.RD() == vrfID {
+				var afi uint16
+				switch ipVersion {
+				case netapi.IP_IPv4:
+					afi = packet.IPv4AFI
+				case netapi.IP_IPv6:
+					afi = packet.IPv6AFI
+				default:
+					return nil, fmt.Errorf("Unknown afi")
+				}
+				ribin := s.bgp.GetRIBIn(neighborAddr, afi, packet.UnicastSAFI)
+				if ribin == nil {
+					return nil, fmt.Errorf("RIB of BGP neighbor not yet available - peer down?")
+				}
+				return ribin, nil
+			}
+		}
+		return nil, fmt.Errorf("Could not find VRF %d", vrfID)
+	}
+
+	return nil, fmt.Errorf("Unable to get router %s", rtr)
 }
 
 // LPM provides a longest prefix match service
 func (s *Server) LPM(ctx context.Context, req *pb.LPMRequest) (*pb.LPMResponse, error) {
-	rib, err := s.getRIB(req.Router, req.VrfId, req.Pfx.Address.Version)
+	rib, err := s.getRIB(req.Router, req.VrfId, req.Pfx.Address.Version, "")
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +219,7 @@ func (s *Server) LPM(ctx context.Context, req *pb.LPMRequest) (*pb.LPMResponse, 
 
 // Get gets a prefix (exact match)
 func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
-	rib, err := s.getRIB(req.Router, req.VrfId, req.Pfx.Address.Version)
+	rib, err := s.getRIB(req.Router, req.VrfId, req.Pfx.Address.Version, "")
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +240,7 @@ func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, 
 
 // GetLonger gets all more specifics of a prefix
 func (s *Server) GetLonger(ctx context.Context, req *pb.GetLongerRequest) (*pb.GetLongerResponse, error) {
-	rib, err := s.getRIB(req.Router, req.VrfId, req.Pfx.Address.Version)
+	rib, err := s.getRIB(req.Router, req.VrfId, req.Pfx.Address.Version, "")
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +268,7 @@ func (s *Server) ObserveRIB(req *pb.ObserveRIBRequest, stream pb.RoutingInformat
 		return fmt.Errorf("Unknown AFI/SAFI")
 	}
 
-	rib, err := s.getRIB(req.Router, req.VrfId, ipVersion)
+	rib, err := s.getRIB(req.Router, req.VrfId, ipVersion, req.Neighbor)
 	if err != nil {
 		return err
 	}
@@ -241,7 +320,7 @@ func (s *Server) DumpRIB(req *pb.DumpRIBRequest, stream pb.RoutingInformationSer
 		return fmt.Errorf("Unknown AFI/SAFI")
 	}
 
-	rib, err := s.getRIB(req.Router, req.VrfId, ipVersion)
+	rib, err := s.getRIB(req.Router, req.VrfId, ipVersion, req.Neighbor)
 	if err != nil {
 		return err
 	}
@@ -279,19 +358,26 @@ func (s *Server) GetRouters(c context.Context, request *pb.GetRoutersRequest) (*
 			SysName: r.Name(),
 			VrfIds:  vrfIDs,
 			Address: r.Address().String(),
+			Source:  pb.Router_BMP,
 		})
 	}
 	if s.bgp != nil {
-		for _, peerIP := range s.bgp.GetPeers() {
-			peerCfg := s.bgp.GetPeerConfig(peerIP)
-			vrfIDs := make([]uint64, 0, 1)
-			vrfIDs = append(vrfIDs, peerCfg.VRF.RD())
-			resp.Routers = append(resp.Routers, &pb.Router{
-				SysName: peerIP.String(),
-				VrfIds:  vrfIDs,
-				Address: peerIP.String(),
-			})
-		}
+		//for _, peerIP := range s.bgp.GetPeers() {
+		//	peerCfg := s.bgp.GetPeerConfig(peerIP)
+		//	vrfIDs := make([]uint64, 0, 1)
+		//	vrfIDs = append(vrfIDs, peerCfg.VRF.RD())
+		//	resp.Routers = append(resp.Routers, &pb.Router{
+		//		SysName: peerIP.String(),
+		//		VrfIds:  vrfIDs,
+		//		Address: peerIP.String(),
+		//	})
+		//}
+		resp.Routers = append(resp.Routers, &pb.Router{
+			SysName: localBGP,
+			VrfIds:  make([]uint64, 0),
+			Address: "127.0.0.1",
+			Source:  pb.Router_BGP,
+		})
 	}
 	return resp, nil
 }
@@ -301,11 +387,26 @@ func (s *Server) GetNeighbors(c context.Context, req *pb.GetNeighborsRequest) (*
 	r := s.bmp.GetRouter(req.Router)
 	if r != nil {
 		resp := &pb.GetNeighborsResponse{
-			Neighbors: r.GetNeighbors(),
+			Neighbors: r.GetNeighborSessions(),
 		}
 		return resp, nil
 	}
-	return nil, fmt.Errorf("Could not find find router")
+
+	if req.Router == localBGP && s.bgp != nil {
+		bgpAPISrv := server.NewBGPAPIServer(s.bgp)
+		filter := bgpapi.ListSessionsRequest{}
+		neighbors, err := bgpAPISrv.ListSessions(c, &filter)
+		if err != nil {
+			return nil, errors.Wrap(err, "Could not get neighbors")
+		}
+		fmt.Printf("Neighbors got len %d with %v\n", len(neighbors.Sessions), neighbors.Sessions)
+		resp := &pb.GetNeighborsResponse{
+			Neighbors: neighbors.Sessions,
+		}
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("Could not find router")
 }
 
 type update struct {

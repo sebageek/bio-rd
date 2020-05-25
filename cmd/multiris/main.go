@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc/keepalive"
 
-	pb "github.com/bio-routing/bio-rd/cmd/ris/api"
+	pb "github.com/bio-routing/bio-rd/cmd/multiris/api"
 	prom_bmp "github.com/bio-routing/bio-rd/metrics/bmp/adapter/prom"
 	log "github.com/sirupsen/logrus"
 )
@@ -68,27 +68,27 @@ func main() {
 				ttl = 64
 			}
 			peerCfg := &server.PeerConfig{
-				AdminEnabled:      true,
+				AdminEnabled:               true,
 				AdvertiseIPv4MultiProtocol: true,
-				ReconnectInterval: 15 * time.Second,
-				HoldTime:          90 * time.Second,
-				KeepAlive:         30 * time.Second,
-				Passive:           true,
-				RouterID:          bgpSrv.RouterID(),
-				LocalAS:           cfg.BGPConfig.LocalASN,
-				LocalAddress:      neighbor.LocalAddressIP,
-				PeerAS:            neighbor.PeerAS,
-				PeerAddress:       neighbor.PeerAddressIP,
-				TTL:               ttl,
+				ReconnectInterval:          15 * time.Second,
+				HoldTime:                   90 * time.Second,
+				KeepAlive:                  30 * time.Second,
+				Passive:                    true,
+				RouterID:                   bgpSrv.RouterID(),
+				LocalAS:                    cfg.BGPConfig.LocalASN,
+				LocalAddress:               neighbor.LocalAddressIP,
+				PeerAS:                     neighbor.PeerAS,
+				PeerAddress:                neighbor.PeerAddressIP,
+				TTL:                        ttl,
 				IPv4: &server.AddressFamilyConfig{
 					ImportFilterChain: filter.NewAcceptAllFilterChain(),
 					ExportFilterChain: filter.NewDrainFilterChain(),
-					AddPathRecv: true,
+					AddPathRecv:       true,
 				},
 				IPv6: &server.AddressFamilyConfig{
 					ImportFilterChain: filter.NewAcceptAllFilterChain(),
 					ExportFilterChain: filter.NewDrainFilterChain(),
-					AddPathRecv: true,
+					AddPathRecv:       true,
 				},
 				VRF: vrfReg.GetVRFByRD(0),
 			}
