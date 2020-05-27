@@ -79,6 +79,7 @@ func main() {
 				LocalAddress:               neighbor.LocalAddressIP,
 				PeerAS:                     neighbor.PeerAS,
 				PeerAddress:                neighbor.PeerAddressIP,
+				Description:                neighbor.Description,
 				TTL:                        ttl,
 				IPv4: &server.AddressFamilyConfig{
 					ImportFilterChain: filter.NewAcceptAllFilterChain(),

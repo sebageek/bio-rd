@@ -13,7 +13,7 @@ import (
 // RISConfig is the config of RIS instance
 type RISConfig struct {
 	BMPServers []BMPServer `yaml:"bmp_servers"`
-	BGPConfig BGPConfig `yaml:"bgp"`
+	BGPConfig  BGPConfig   `yaml:"bgp"`
 }
 
 // BMPServer represent a BMP enable Router
@@ -24,20 +24,21 @@ type BMPServer struct {
 
 // BGPConfig represents this local bgp router and its neighbors
 type BGPConfig struct {
-	LocalASN	uint32			`yaml:"local_asn"`
-	RouterID	string			`yaml:"router_id"`
+	LocalASN       uint32 `yaml:"local_asn"`
+	RouterID       string `yaml:"router_id"`
 	RouterIDUint32 uint32
-	Neighbors	[]*BGPNeighbor	`yaml:"neighbors"`
+	Neighbors      []*BGPNeighbor `yaml:"neighbors"`
 }
 
 // BGPNeighbor represents the config for a neighbor... speaking BGP!
 type BGPNeighbor struct {
-	LocalAddress string `yaml:"local_address"`
+	LocalAddress   string `yaml:"local_address"`
 	LocalAddressIP *bnet.IP
-	PeerAddress string `yaml:"peer_address"`
-	PeerAddressIP *bnet.IP
-	PeerAS      uint32 `yaml:"peer_as"`
-	MultiHop	bool `yaml:"multi_hop"`
+	PeerAddress    string `yaml:"peer_address"`
+	PeerAddressIP  *bnet.IP
+	PeerAS         uint32 `yaml:"peer_as"`
+	MultiHop       bool   `yaml:"multi_hop"`
+	Description    string `yaml:"description"`
 }
 
 // LoadConfig loads a RIS config
@@ -60,6 +61,7 @@ func LoadConfig(filepath string) (*RISConfig, error) {
 
 	return cfg, nil
 }
+
 //LoadConfig
 
 func (c *RISConfig) load() error {
@@ -74,11 +76,11 @@ func (c *RISConfig) load() error {
 }
 
 func (c *BGPConfig) load() error {
-    addr, err := bnet.IPFromString(c.RouterID)
-    if err != nil {
-        return errors.Wrap(err, "Unable to parse router id")
-    }
-    c.RouterIDUint32 = uint32(addr.Lower())
+	addr, err := bnet.IPFromString(c.RouterID)
+	if err != nil {
+		return errors.Wrap(err, "Unable to parse router id")
+	}
+	c.RouterIDUint32 = uint32(addr.Lower())
 
 	for _, neighbor := range c.Neighbors {
 		fmt.Printf("Loading neighbor %v\n", neighbor)
@@ -92,16 +94,16 @@ func (c *BGPConfig) load() error {
 }
 
 func (neighbor *BGPNeighbor) load() error {
-    addr, err := bnet.IPFromString(neighbor.PeerAddress)
-    if err != nil {
-        return errors.Wrapf(err, "Unable to parse neighbor peer address %s", neighbor.PeerAddress)
-    }
+	addr, err := bnet.IPFromString(neighbor.PeerAddress)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to parse neighbor peer address %s", neighbor.PeerAddress)
+	}
 	neighbor.PeerAddressIP = addr.Dedup()
 
-    addr, err = bnet.IPFromString(neighbor.LocalAddress)
-    if err != nil {
-        return errors.Wrapf(err, "Unable to parse neighbor local address %s", neighbor.LocalAddress)
-    }
+	addr, err = bnet.IPFromString(neighbor.LocalAddress)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to parse neighbor local address %s", neighbor.LocalAddress)
+	}
 	neighbor.LocalAddressIP = addr.Dedup()
 
 	return nil
